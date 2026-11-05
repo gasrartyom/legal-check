@@ -94,8 +94,9 @@ Rules:
 - This is educational information, not legal advice; do not add your own disclaimer, the site shows one.`;
 
 const MAX_CONTINUATIONS = 4;
-// Tests run on the cheap model via LEGAL_CHECK_MODEL=claude-haiku-5-5.
-const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5";
+// Site model: Opus 5.5. In red-light runs it found all sections every time and, unlike Sonnet 5.5
+// (about half the price), never stated an unverified bill as fact. Override with LEGAL_CHECK_MODEL.
+export const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5";
 
 /** Token counts of one sampling step (both the SDK's per-iteration usage and its top-level usage fit). */
 type Step = {

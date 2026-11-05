@@ -1,7 +1,7 @@
 // Runs test cases against the real API (costs money).
 // Usage: LEGAL_CHECK_MODEL=claude-haiku-5-5 node scripts/cases.ts red-light [fight ...]
 import assert from "node:assert/strict";
-import { checkSituation, type Usage } from "../lib/check.ts";
+import { checkSituation, MODEL, type Usage } from "../lib/check.ts";
 
 // `expect`: section numbers, any one match counts. `cite`: every one must be a card's section
 // (exact number: 21456 doesn't match 21456.1). `mention`: must appear somewhere in the answer.
@@ -29,7 +29,6 @@ const RATES: Record<string, Rates> = {
   "claude-opus-5-5": () => [4, 20, 0.2],
 };
 const SEARCH_PRICE = 0.01; // web search: $10 / 1000
-const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5"; // same default as lib/check.ts
 if (!RATES[MODEL]) {
   console.error(`No prices for ${MODEL}; add them to RATES.`);
   process.exit(1);
