@@ -108,6 +108,9 @@ type Step = {
   max_prompt?: number;
 };
 
+/** An error the UI can explain: the message is a code with a translation in the UI dictionaries. */
+export class CheckError extends Error {}
+
 export type Usage = {
   /** All prompt tokens: uncached + cache reads + cache writes. */
   input_tokens: number;
@@ -124,7 +127,7 @@ export async function checkSituation(
   situation: string,
 ): Promise<CheckResult & { usage: Usage }> {
   const apiKey = process.env.LEGAL_CHECK_API_KEY;
-  if (!apiKey) throw new Error("Server is not configured: LEGAL_CHECK_API_KEY is missing.");
+  if (!apiKey) throw new CheckError("not_configured");
   // Pinned baseURL so an ANTHROPIC_BASE_URL in the environment can't redirect the key elsewhere.
   const client = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com" });
   const official = [STATES[state].domain, ...FEDERAL_DOMAINS];
@@ -195,15 +198,15 @@ export async function checkSituation(
       messages.push({ role: "assistant", content: msg.content });
       continue;
     }
-    if (msg.stop_reason === "refusal") throw new Error("The model declined to answer this request.");
-    if (msg.stop_reason === "max_tokens") throw new Error("The answer was cut off. Please try again.");
+    if (msg.stop_reason === "refusal") throw new CheckError("refused");
+    if (msg.stop_reason === "max_tokens") throw new CheckError("cut_off");
 
     const text = msg.content.findLast((b) => b.type === "text");
-    if (!text || text.type !== "text") throw new Error("The model returned no answer.");
+    if (!text || text.type !== "text") throw new CheckError("no_answer");
     const result = JSON.parse(text.text) as CheckResult;
     return { ...result, cards: verifyCards(result.cards, seen, official), usage };
   }
-  throw new Error("The search took too long. Please try again.");
+  throw new CheckError("timeout");
 }
 
 type Block = { type: string; name?: string; input?: unknown; content?: unknown };
