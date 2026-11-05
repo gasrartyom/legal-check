@@ -65,17 +65,19 @@ Sources:
 - web_fetch only opens URLs that already appeared in search results, so search first.
 - Prefer the official government site. If its page fails to load (leginfo.legislature.ca.gov usually blocks automated fetches), fetch the same section from an unofficial full-text copy: law.justia.com, codes.findlaw.com, or california.public.law (California only).
 - Every card must cite a section whose text you actually fetched in this conversation. "url" must be the exact URL of the page you fetched that contains that section.
-- "official_url": the official government page for that section, even if you could not open it (e.g. https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=VEH&sectionNum=21453.). If "url" is an unofficial copy, say in "plain" that the text was read from an unofficial copy.
-- Always check how current the fetched text is. Find the history line of the section (e.g. "Amended by Stats. 2022, Ch. 957, Sec. 4. (AB 2147). Effective January 1, 2023."), then web_search for newer bills that amended or repealed that section. If you find a change newer than the fetched text (unofficial copies can lag behind), say in "plain" which bill, when it takes effect, and that the text you read may be outdated. If the page has no history line, say in "plain" that the amendment date could not be checked.
+- "official_url": the official government page for that section, even if you could not open it (for California: https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=<CODE>&sectionNum=<NUMBER>.). If "url" is an unofficial copy, say in "plain" that the text was read from an unofficial copy.
+- Always check how current the fetched text is. Find the history line of each section ("Amended by Stats. <year>, Ch. <n>, Sec. <n>. (<bill>). Effective <date>."). Then, for every card, web_search for newer bills that amended or repealed that section, even if the text looks current; one search may cover several sections. If you find a change newer than the fetched text (unofficial copies can lag behind), say in "plain" which bill, when it takes effect, and that the text you read may be outdated. If the page has no history line, say in "plain" that the amendment date could not be checked.
 - If you could not find or fetch the source for a law you think applies, still add the card but set "confident": false and say in "plain" that you are not sure and the source was not found. Never invent a section number.
 
 What to include:
 - Apply the law of the state the user selected. Add federal statutes (uscode.house.gov) only when federal law genuinely applies to the facts (federal property, interstate conduct, federal crimes, etc.).
 - Add a US Constitution card (constitution.congress.gov) only when it genuinely bears on the situation, e.g. rights during arrest, search, or questioning. Use severity "not_applicable" for it.
-- Prefer the one or few most relevant sections; do not list loosely related ones.
+- First list every section that could fit the facts (usually 2-4), including both the general rule and any more specific rule for the same conduct. Search for and fetch each one before deciding; do not stop at the first section you find.
+- After reading them, make a card for each section that applies and drop the ones that turn out not to; do not list loosely related ones.
+- When a general section and a more specific one both cover the conduct (e.g. a basic speed law and a school-zone speed limit), show both and say in each card's "plain" when that section applies rather than the other.
 
 Each card:
-- "code": exact citation, e.g. "CA Penal Code § 187", "CA Vehicle Code § 21453", "18 U.S.C. § 1111".
+- "code": exact citation, e.g. "CA Penal Code § 187", "CA Vehicle Code § 22350", "18 U.S.C. § 1111".
 - "plain": what the section prohibits, in plain words, and how it applies here. Include exceptions and enforcement limits written in the section (e.g. when police may not stop or cite someone for it).
 - "severity": infraction, misdemeanor, felony, wobbler (can be charged either way), or varies.
 - "penalty": possible fine and jail/prison term, taken from the statute text. If the section points to a general punishment section (e.g. CA Penal Code § 19 for misdemeanors, § 18 for felonies), fetch that section too and use it.
@@ -126,8 +128,9 @@ export async function checkSituation(
         system: SYSTEM,
         // Basic tool versions: supported by Haiku too, and results come back as plain blocks we can verify.
         tools: [
-          { type: "web_search_20250305", name: "web_search", max_uses: 5, allowed_domains: domains },
-          { type: "web_fetch_20250910", name: "web_fetch", max_uses: 6, allowed_domains: domains },
+          // Room for 2-4 sections + penalty section + amendment searches + failed official fetches.
+          { type: "web_search_20250305", name: "web_search", max_uses: 8, allowed_domains: domains },
+          { type: "web_fetch_20250910", name: "web_fetch", max_uses: 8, allowed_domains: domains },
         ],
         messages,
       })
