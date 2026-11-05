@@ -97,12 +97,25 @@ const MAX_CONTINUATIONS = 4;
 // Tests run on the cheap model via LEGAL_CHECK_MODEL=claude-haiku-5-5.
 const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5";
 
+/** Token counts of one sampling step (both the SDK's per-iteration usage and its top-level usage fit). */
+type Step = {
+  input_tokens: number;
+  cache_read_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
+  output_tokens: number;
+  /** Set when several sampling steps are reported as one entry: upper bound of their largest prompt. */
+  max_prompt?: number;
+};
+
 export type Usage = {
+  /** All prompt tokens: uncached + cache reads + cache writes. */
   input_tokens: number;
   output_tokens: number;
   web_searches: number;
   amendment_searches: number;
   requests: number;
+  /** One entry per sampling step of the server tool loop; prompt-size price tiers apply per step. */
+  steps: Step[];
 };
 
 export async function checkSituation(
@@ -119,27 +132,42 @@ export async function checkSituation(
     { role: "user", content: `State: ${STATES[state].name}\n\nWhat happened:\n${situation}` },
   ];
   const seen = new Set<string>();
-  const usage: Usage = { input_tokens: 0, output_tokens: 0, web_searches: 0, amendment_searches: 0, requests: 0 };
+  const usage: Usage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    web_searches: 0,
+    amendment_searches: 0,
+    requests: 0,
+    steps: [],
+  };
 
   for (let i = 0; i <= MAX_CONTINUATIONS; i++) {
+    let first: Step | undefined; // first step's usage, from message_start
     const msg = await client.beta.messages
       .stream({
         model: MODEL,
         max_tokens: 32000,
-        // Server-side refusal fallback exists for Opus, not Haiku.
-        ...(MODEL.startsWith("claude-opus") && {
+        // Server-side refusal fallback exists for Opus and Sonnet 5.5, not Haiku.
+        ...((MODEL.startsWith("claude-opus") || MODEL === "claude-sonnet-5-5") && {
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default" as const,
         }),
         output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
+        // Each step of the server tool loop re-reads the whole context; with caching on, the API caches it
+        // after every tool result, so later steps pay ~0.1x for what earlier steps already sent.
+        cache_control: { type: "ephemeral" },
         system: SYSTEM,
         // Basic tool versions: supported by Haiku too, and results come back as plain blocks we can verify.
         tools: [
           // Room for 2-4 sections + penalty section + amendment searches + failed official fetches.
           { type: "web_search_20250305", name: "web_search", max_uses: 8, allowed_domains: domains },
-          { type: "web_fetch_20250910", name: "web_fetch", max_uses: 8, allowed_domains: domains },
+          // Caps whole-chapter/article pages; a single-section page (~3-5K tokens) fits whole.
+          { type: "web_fetch_20250910", name: "web_fetch", max_uses: 8, max_content_tokens: 8000, allowed_domains: domains },
         ],
         messages,
+      })
+      .on("streamEvent", (e) => {
+        if (e.type === "message_start") first = e.message.usage;
       })
       .finalMessage();
 
@@ -147,6 +175,16 @@ export async function checkSituation(
     usage.input_tokens +=
       msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0);
     usage.output_tokens += msg.usage.output_tokens;
+    const steps = msg.usage.iterations?.filter((it) => it.type === "message") ?? [];
+    if (steps.length) usage.steps.push(...steps);
+    else {
+      // No per-step breakdown (seen with Haiku). A step reads from cache at most the previous step's prompt,
+      // so no prompt exceeds the first step's cache read + all cache writes + all uncached input.
+      const { input_tokens, cache_read_input_tokens, cache_creation_input_tokens, output_tokens } = msg.usage;
+      const firstRead = first?.cache_read_input_tokens ?? cache_read_input_tokens ?? 0;
+      const max_prompt = firstRead + (cache_creation_input_tokens ?? 0) + input_tokens;
+      usage.steps.push({ input_tokens, cache_read_input_tokens, cache_creation_input_tokens, output_tokens, max_prompt });
+    }
     usage.web_searches += msg.usage.server_tool_use?.web_search_requests ?? 0;
     usage.amendment_searches += amendmentSearches(msg.content);
     collectUrls(msg.content, seen);
