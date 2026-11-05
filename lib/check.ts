@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 // Relative .ts imports so the unit test and scripts/cases.ts run under plain `node`.
-import { STATES, FEDERAL_DOMAINS, type StateCode } from "./states.ts";
+import { STATES, FEDERAL_DOMAINS, MIRROR_DOMAINS, type StateCode } from "./states.ts";
 
 export type Severity =
   | "infraction"
@@ -13,6 +13,9 @@ export type Severity =
 export type Card = {
   code: string;
   url: string;
+  official_url: string;
+  /** Set by the server: `url` is an unofficial copy, not the official site. */
+  unofficial_copy: boolean;
   plain: string;
   severity: Severity;
   penalty: string;
@@ -37,10 +40,11 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["code", "url", "plain", "severity", "penalty", "confident"],
+        required: ["code", "url", "official_url", "plain", "severity", "penalty", "confident"],
         properties: {
           code: { type: "string" },
           url: { type: "string" },
+          official_url: { type: "string" },
           plain: { type: "string" },
           severity: {
             type: "string",
@@ -57,8 +61,11 @@ const SCHEMA = {
 const SYSTEM = `You explain which US laws a described action may violate. You explain the law only.
 
 Sources:
-- Use web_search and web_fetch to find and READ the current statute text on the allowed official sites. Never rely on memory for a section number, its wording, or its penalty.
+- Use web_search and web_fetch to find and READ the full current statute text. Never rely on memory for a section number, its wording, or its penalty. Search snippets are not the statute text.
+- web_fetch only opens URLs that already appeared in search results, so search first.
+- Prefer the official government site. If its page fails to load (leginfo.legislature.ca.gov usually blocks automated fetches), fetch the same section from an unofficial full-text copy: law.justia.com, codes.findlaw.com, or california.public.law (California only).
 - Every card must cite a section whose text you actually fetched in this conversation. "url" must be the exact URL of the page you fetched that contains that section.
+- "official_url": the official government page for that section, even if you could not open it (e.g. https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=VEH&sectionNum=21453.). If "url" is an unofficial copy, say in "plain" that the text was read from an unofficial copy.
 - If you could not find or fetch the source for a law you think applies, still add the card but set "confident": false and say in "plain" that you are not sure and the source was not found. Never invent a section number.
 
 What to include:
@@ -68,7 +75,7 @@ What to include:
 
 Each card:
 - "code": exact citation, e.g. "CA Penal Code § 187", "CA Vehicle Code § 21453", "18 U.S.C. § 1111".
-- "plain": what the section prohibits, in plain words, and how it applies here.
+- "plain": what the section prohibits, in plain words, and how it applies here. Include exceptions and enforcement limits written in the section (e.g. when police may not stop or cite someone for it).
 - "severity": infraction, misdemeanor, felony, wobbler (can be charged either way), or varies.
 - "penalty": possible fine and jail/prison term, taken from the statute text. If the section points to a general punishment section (e.g. CA Penal Code § 19 for misdemeanors, § 18 for felonies), fetch that section too and use it.
 
@@ -96,7 +103,8 @@ export async function checkSituation(
   if (!apiKey) throw new Error("Server is not configured: LEGAL_CHECK_API_KEY is missing.");
   // Pinned baseURL so an ANTHROPIC_BASE_URL in the environment can't redirect the key elsewhere.
   const client = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com" });
-  const domains = [STATES[state].domain, ...FEDERAL_DOMAINS];
+  const official = [STATES[state].domain, ...FEDERAL_DOMAINS];
+  const domains = [...official, ...MIRROR_DOMAINS];
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     { role: "user", content: `State: ${STATES[state].name}\n\nWhat happened:\n${situation}` },
   ];
@@ -142,39 +150,50 @@ export async function checkSituation(
     const text = msg.content.findLast((b) => b.type === "text");
     if (!text || text.type !== "text") throw new Error("The model returned no answer.");
     const result = JSON.parse(text.text) as CheckResult;
-    return { ...result, cards: verifyCards(result.cards, seen, domains), usage };
+    return { ...result, cards: verifyCards(result.cards, seen, official), usage };
   }
   throw new Error("The search took too long. Please try again.");
 }
 
 type Block = { type: string; content?: unknown };
 
-/** URLs the model actually received from web_fetch / web_search in this conversation. */
+/** URLs whose full text the model actually received via web_fetch. Search hits don't count: a snippet is not the statute. */
 export function collectUrls(content: Block[], seen: Set<string>) {
   for (const b of content) {
     if (b.type === "web_fetch_tool_result") {
       const c = b.content as { type: string; url?: string };
       if (c.type === "web_fetch_result" && c.url) seen.add(normalize(c.url));
-    } else if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
-      for (const r of b.content as { url?: string }[]) if (r.url) seen.add(normalize(r.url));
     }
   }
 }
 
-/** Server-side guard: a card is confident only if its URL is on an allowed domain and was really fetched. */
-export function verifyCards(cards: Card[], seen: Set<string>, domains: string[]): Card[] {
+/**
+ * Server-side guard: a card is confident only if its URL is on an official or mirror domain and was really fetched.
+ * `official_url` is kept only on an official domain; it may point to a page that could not be fetched.
+ */
+export function verifyCards(cards: Card[], seen: Set<string>, official: string[]): Card[] {
   return cards.map((card) => {
-    let host: string;
-    try {
-      host = new URL(card.url).hostname.toLowerCase();
-    } catch {
-      return { ...card, url: "", confident: false };
+    const official_url = onDomain(card.official_url, official) ? card.official_url : "";
+    const isOfficial = onDomain(card.url, official);
+    if (!isOfficial && !onDomain(card.url, MIRROR_DOMAINS)) {
+      return { ...card, url: "", official_url, unofficial_copy: false, confident: false };
     }
-    if (!domains.some((d) => host === d || host.endsWith("." + d))) {
-      return { ...card, url: "", confident: false };
-    }
-    return { ...card, confident: card.confident && seen.has(normalize(card.url)) };
+    return {
+      ...card,
+      official_url: official_url || (isOfficial ? card.url : ""),
+      unofficial_copy: !isOfficial,
+      confident: card.confident && seen.has(normalize(card.url)),
+    };
   });
+}
+
+function onDomain(url: string, domains: string[]) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return domains.some((d) => host === d || host.endsWith("." + d));
+  } catch {
+    return false;
+  }
 }
 
 function normalize(url: string) {

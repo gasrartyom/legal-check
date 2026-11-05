@@ -37,8 +37,9 @@ export default function Home() {
       <header className="mb-8">
         <h1 className="text-3xl font-semibold tracking-tight">Legal Check</h1>
         <p className="mt-2 text-muted">
-          Describe what happened. We look up the actual statutes on official government sites and
-          explain which laws may apply — or why none do. English or Russian.
+          Describe what happened. We look up the actual statutes on official government sites (or
+          a full-text copy when the official site is unreachable) and explain which laws may apply —
+          or why none do. English or Russian.
         </p>
       </header>
 

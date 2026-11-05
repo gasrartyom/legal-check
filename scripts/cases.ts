@@ -2,19 +2,24 @@
 // Usage: LEGAL_CHECK_MODEL=claude-haiku-5-5 node scripts/cases.ts red-light [fight ...]
 import { checkSituation } from "../lib/check.ts";
 
-// Expected section numbers; any one match counts.
-const CASES = {
-  "red-light": { situation: "I crossed the street on a red light in Los Angeles", expect: ["21453", "21456", "21950"] },
+// Expected section numbers; any one match counts. `mention`: must appear somewhere in the answer.
+const CASES: Record<string, { situation: string; expect: string[]; mention?: RegExp }> = {
+  "red-light": {
+    situation: "I crossed the street on a red light in Los Angeles",
+    expect: ["21453", "21456", "21950"],
+    // AB 2147 (Freedom to Walk Act): no stop unless there is an immediate danger of collision.
+    mention: /(immediate|imminent) danger/i,
+  },
   fight: { situation: "Я ударил человека в драке", expect: ["242", "243"] },
   murder: { situation: "I killed a person on purpose", expect: ["187"] },
   chocolate: { situation: "Украл шоколадку в магазине", expect: ["484", "488", "490"] },
-  bread: { situation: "I bought bread at a store", expect: [] as string[] },
+  bread: { situation: "I bought bread at a store", expect: [] },
 };
 
 // Haiku 5.5 rates for prompts <= 100K tokens; web search $10 / 1000.
 const PRICE = { input: 0.1 / 1e6, output: 0.5 / 1e6, search: 0.01 };
 
-const names = process.argv.slice(2) as (keyof typeof CASES)[];
+const names = process.argv.slice(2);
 if (!names.length || names.some((n) => !(n in CASES))) {
   console.error(`Pick cases: ${Object.keys(CASES).join(", ")}`);
   process.exit(1);
@@ -22,13 +27,15 @@ if (!names.length || names.some((n) => !(n in CASES))) {
 
 let failed = 0;
 for (const name of names) {
-  const { situation, expect } = CASES[name];
+  const { situation, expect, mention } = CASES[name];
   const t = Date.now();
   const { usage, ...result } = await checkSituation("CA", situation);
   const codes = result.cards.map((c) => c.code).join(" ");
-  const ok = expect.length
-    ? result.verdict === "violation" && expect.some((n) => codes.includes(n))
-    : result.verdict === "no_violation" && result.cards.length === 0;
+  const ok =
+    (expect.length
+      ? result.verdict === "violation" && expect.some((n) => codes.includes(n))
+      : result.verdict === "no_violation" && result.cards.length === 0) &&
+    (!mention || mention.test(JSON.stringify(result)));
   if (!ok) failed++;
   const cost =
     usage.input_tokens * PRICE.input + usage.output_tokens * PRICE.output + usage.web_searches * PRICE.search;
