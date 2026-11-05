@@ -66,6 +66,7 @@ Sources:
 - Prefer the official government site. If its page fails to load (leginfo.legislature.ca.gov usually blocks automated fetches), fetch the same section from an unofficial full-text copy: law.justia.com, codes.findlaw.com, or california.public.law (California only).
 - Every card must cite a section whose text you actually fetched in this conversation. "url" must be the exact URL of the page you fetched that contains that section.
 - "official_url": the official government page for that section, even if you could not open it (e.g. https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=VEH&sectionNum=21453.). If "url" is an unofficial copy, say in "plain" that the text was read from an unofficial copy.
+- Always check how current the fetched text is. Find the history line of the section (e.g. "Amended by Stats. 2022, Ch. 957, Sec. 4. (AB 2147). Effective January 1, 2023."), then web_search for newer bills that amended or repealed that section. If you find a change newer than the fetched text (unofficial copies can lag behind), say in "plain" which bill, when it takes effect, and that the text you read may be outdated. If the page has no history line, say in "plain" that the amendment date could not be checked.
 - If you could not find or fetch the source for a law you think applies, still add the card but set "confident": false and say in "plain" that you are not sure and the source was not found. Never invent a section number.
 
 What to include:
