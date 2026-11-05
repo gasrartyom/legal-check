@@ -12,7 +12,7 @@ cp .env.example .env.local   # then set LEGAL_CHECK_API_KEY
 npm run dev
 ```
 
-Without Redis variables the daily limit is counted in memory, which is fine locally.
+Without Redis variables the daily limits are counted in memory, which is fine locally.
 
 ## Tests
 
@@ -24,7 +24,7 @@ Without Redis variables the daily limit is counted in memory, which is fine loca
 
 1. **Import the repository** in Vercel (New Project). Framework: Next.js, detected automatically;
    build command and output need no changes. Set the production branch to the branch you deploy.
-2. **Add Redis for the daily limit**: Storage (Marketplace) → Upstash for Redis → create a database
+2. **Add Redis for the daily limits**: Storage (Marketplace) → Upstash for Redis → create a database
    and connect it to the project. It adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the
    `UPSTASH_REDIS_REST_*` pair); both naming schemes work.
 3. **Environment variables** (Settings → Environment Variables):
@@ -37,14 +37,17 @@ Without Redis variables the daily limit is counted in memory, which is fine loca
 
 4. **Functions**: keep Fluid compute on (default for new projects). `/api/check` sets
    `maxDuration = 120` seconds; a check usually takes 20–40 s.
-5. **Set a spend limit on the Anthropic side** (Console → workspace limits) as a backstop:
-   the per-IP limit does not cap the total. Each check costs about $0.5 on Opus 5.5,
-   so 100 visitors using all 3 checks is about $150 a day.
+5. **Set a spend limit on the Anthropic side** (Console → workspace limits) as a backstop.
+   The site allows 10 checks a day in total (`SITE_LIMIT` in `lib/rate-limit.ts`), about $5 a day
+   on Opus 5.5, but only while Redis works and the code is unchanged.
 6. Leave Deployment Protection on for Preview deployments so previews are not public.
 
 After deploying: open `/` (redirects to `/en` or `/ru`), switch the language, and run one check.
 A 4th check from the same IP on the same UTC day should show the limit message.
 
-The limit counts a check when the request is accepted, before the model runs, so failed checks
-count too. Client IP comes from `x-forwarded-for`, which Vercel sets and does not let clients spoof;
+Limits (UTC day): 3 checks per IP and 10 for the whole site. A check that fails (server error,
+model refusal) is given back to the user's quota but still counts for the site, since the model
+may have run. Requests rejected by a limit use no quota.
+
+Client IP comes from `x-forwarded-for`, which Vercel sets and does not let clients spoof;
 behind another proxy that header would need to be trusted explicitly.

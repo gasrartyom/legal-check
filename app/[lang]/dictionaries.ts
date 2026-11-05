@@ -33,6 +33,7 @@ const en = {
   errors: {
     invalid_input: "Pick a state and describe the situation (up to 2000 characters).",
     rate_limited: "Daily limit reached: up to 3 checks per day. You can check again after {time}.",
+    site_limit: "The site has used up its daily limit. Please try again tomorrow.",
     not_configured: "The service is not set up yet. Please try again later.",
     refused: "The model declined to answer this request.",
     cut_off: "The answer was cut off. Please try again.",
@@ -79,6 +80,7 @@ const ru: Dict = {
   errors: {
     invalid_input: "Выберите штат и опишите ситуацию (до 2000 символов).",
     rate_limited: "Лимит исчерпан: не больше 3 проверок в день. Следующая проверка будет доступна после {time}.",
+    site_limit: "Сайт исчерпал дневной лимит, попробуй завтра.",
     not_configured: "Сервис ещё не настроен. Попробуйте позже.",
     refused: "Модель отказалась отвечать на этот запрос.",
     cut_off: "Ответ оборвался. Попробуйте ещё раз.",
