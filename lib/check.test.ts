@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectUrls, verifyCards, type Card } from "./check.ts";
+import { amendmentSearches, collectUrls, verifyCards, type Card } from "./check.ts";
 
 const domains = ["leginfo.legislature.ca.gov", "uscode.house.gov"];
 const PC187 =
@@ -55,4 +55,18 @@ test("verifyCards", () => {
   // official_url must be on an official domain; an official url doubles as official_url
   assert.equal(verifyCards([card(MIRROR, true, "https://law.justia.com/x")], seen, domains)[0].official_url, "");
   assert.equal(verifyCards([card(PC187, true, "")], seen, domains)[0].official_url, PC187);
+});
+
+test("amendmentSearches counts only web_search queries about amendments", () => {
+  const search = (query: string, name = "web_search") => ({ type: "server_tool_use", name, input: { query } });
+  assert.equal(
+    amendmentSearches([
+      search("CA Vehicle Code 21456 amended 2025"),
+      search("Penal Code 484 repealed"),
+      search("CA Vehicle Code 21456 pedestrian signal"),
+      search("amended", "web_fetch"),
+      { type: "text" },
+    ]),
+    2,
+  );
 });

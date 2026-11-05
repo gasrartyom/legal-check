@@ -31,15 +31,20 @@ for (const name of names) {
   const t = Date.now();
   const { usage, ...result } = await checkSituation("CA", situation);
   const codes = result.cards.map((c) => c.code).join(" ");
-  const ok =
-    (expect.length
+  const checks = {
+    verdict: expect.length
       ? result.verdict === "violation" && expect.some((n) => codes.includes(n))
-      : result.verdict === "no_violation" && result.cards.length === 0) &&
-    (!mention || mention.test(JSON.stringify(result)));
+      : result.verdict === "no_violation" && result.cards.length === 0,
+    mention: !mention || mention.test(JSON.stringify(result)),
+    // Prompt makes the "newer amendments" search mandatory for every card.
+    amendment_search: !result.cards.length || usage.amendment_searches > 0,
+  };
+  const failedChecks = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+  const ok = !failedChecks.length;
   if (!ok) failed++;
   const cost =
     usage.input_tokens * PRICE.input + usage.output_tokens * PRICE.output + usage.web_searches * PRICE.search;
-  console.log(`\n=== ${name}: ${ok ? "PASS" : "FAIL"} (${((Date.now() - t) / 1000).toFixed(0)}s) ===`);
+  console.log(`\n=== ${name}: ${ok ? "PASS" : `FAIL [${failedChecks.join(", ")}]`} (${((Date.now() - t) / 1000).toFixed(0)}s) ===`);
   console.log(JSON.stringify(result, null, 2));
   console.log("usage", usage, `≈ $${cost.toFixed(4)} at Haiku 5.5 rates`);
 }

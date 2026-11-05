@@ -66,7 +66,7 @@ Sources:
 - Prefer the official government site. If its page fails to load (leginfo.legislature.ca.gov usually blocks automated fetches), fetch the same section from an unofficial full-text copy: law.justia.com, codes.findlaw.com, or california.public.law (California only).
 - Every card must cite a section whose text you actually fetched in this conversation. "url" must be the exact URL of the page you fetched that contains that section.
 - "official_url": the official government page for that section, even if you could not open it (for California: https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=<CODE>&sectionNum=<NUMBER>.). If "url" is an unofficial copy, say in "plain" that the text was read from an unofficial copy.
-- Always check how current the fetched text is. Find the history line of each section ("Amended by Stats. <year>, Ch. <n>, Sec. <n>. (<bill>). Effective <date>."). Then, for every card, web_search for newer bills that amended or repealed that section, even if the text looks current; one search may cover several sections. If you find a change newer than the fetched text (unofficial copies can lag behind), say in "plain" which bill, when it takes effect, and that the text you read may be outdated. If the page has no history line, say in "plain" that the amendment date could not be checked.
+- Always check how current the fetched text is. Find the history line of each section ("Amended by Stats. <year>, Ch. <n>, Sec. <n>. (<bill>). Effective <date>."). Then, for every card, web_search for newer bills that amended or repealed that section, even if the text looks current. This search is mandatory; put the word "amended" in its query (e.g. "<code> section <n> amended"); one search may cover several sections. If you find a change newer than the fetched text (unofficial copies can lag behind), say in "plain" which bill, when it takes effect, and that the text you read may be outdated. If the page has no history line, say in "plain" that the amendment date could not be checked.
 - If you could not find or fetch the source for a law you think applies, still add the card but set "confident": false and say in "plain" that you are not sure and the source was not found. Never invent a section number.
 
 What to include:
@@ -96,7 +96,13 @@ const MAX_CONTINUATIONS = 4;
 // Tests run on the cheap model via LEGAL_CHECK_MODEL=claude-haiku-5-5.
 const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5";
 
-export type Usage = { input_tokens: number; output_tokens: number; web_searches: number; requests: number };
+export type Usage = {
+  input_tokens: number;
+  output_tokens: number;
+  web_searches: number;
+  amendment_searches: number;
+  requests: number;
+};
 
 export async function checkSituation(
   state: StateCode,
@@ -112,7 +118,7 @@ export async function checkSituation(
     { role: "user", content: `State: ${STATES[state].name}\n\nWhat happened:\n${situation}` },
   ];
   const seen = new Set<string>();
-  const usage: Usage = { input_tokens: 0, output_tokens: 0, web_searches: 0, requests: 0 };
+  const usage: Usage = { input_tokens: 0, output_tokens: 0, web_searches: 0, amendment_searches: 0, requests: 0 };
 
   for (let i = 0; i <= MAX_CONTINUATIONS; i++) {
     const msg = await client.beta.messages
@@ -141,6 +147,7 @@ export async function checkSituation(
       msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0);
     usage.output_tokens += msg.usage.output_tokens;
     usage.web_searches += msg.usage.server_tool_use?.web_search_requests ?? 0;
+    usage.amendment_searches += amendmentSearches(msg.content);
     collectUrls(msg.content, seen);
 
     if (msg.stop_reason === "pause_turn") {
@@ -159,7 +166,17 @@ export async function checkSituation(
   throw new Error("The search took too long. Please try again.");
 }
 
-type Block = { type: string; content?: unknown };
+type Block = { type: string; name?: string; input?: unknown; content?: unknown };
+
+/** web_search calls looking for later amendments (the prompt asks for "amended" in that query). */
+export function amendmentSearches(content: Block[]) {
+  return content.filter(
+    (b) =>
+      b.type === "server_tool_use" &&
+      b.name === "web_search" &&
+      /amend|repeal/i.test(String((b.input as { query?: string } | undefined)?.query)),
+  ).length;
+}
 
 /** URLs whose full text the model actually received via web_fetch. Search hits don't count: a snippet is not the statute. */
 export function collectUrls(content: Block[], seen: Set<string>) {
