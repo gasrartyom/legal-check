@@ -83,32 +83,52 @@ Rules:
 - This is educational information, not legal advice; do not add your own disclaimer, the site shows one.`;
 
 const MAX_CONTINUATIONS = 4;
+// Tests run on the cheap model via LEGAL_CHECK_MODEL=claude-haiku-5-5.
+const MODEL = process.env.LEGAL_CHECK_MODEL || "claude-opus-5-5";
 
-export async function checkSituation(state: StateCode, situation: string): Promise<CheckResult> {
-  const client = new Anthropic();
+export type Usage = { input_tokens: number; output_tokens: number; web_searches: number; requests: number };
+
+export async function checkSituation(
+  state: StateCode,
+  situation: string,
+): Promise<CheckResult & { usage: Usage }> {
+  const apiKey = process.env.LEGAL_CHECK_API_KEY;
+  if (!apiKey) throw new Error("Server is not configured: LEGAL_CHECK_API_KEY is missing.");
+  // Pinned baseURL so an ANTHROPIC_BASE_URL in the environment can't redirect the key elsewhere.
+  const client = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com" });
   const domains = [STATES[state].domain, ...FEDERAL_DOMAINS];
   const messages: Anthropic.Beta.BetaMessageParam[] = [
     { role: "user", content: `State: ${STATES[state].name}\n\nWhat happened:\n${situation}` },
   ];
   const seen = new Set<string>();
+  const usage: Usage = { input_tokens: 0, output_tokens: 0, web_searches: 0, requests: 0 };
 
   for (let i = 0; i <= MAX_CONTINUATIONS; i++) {
     const msg = await client.beta.messages
       .stream({
-        model: "claude-opus-5-5",
+        model: MODEL,
         max_tokens: 32000,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        // Server-side refusal fallback exists for Opus, not Haiku.
+        ...(MODEL.startsWith("claude-opus") && {
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default" as const,
+        }),
         output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
         system: SYSTEM,
+        // Basic tool versions: supported by Haiku too, and results come back as plain blocks we can verify.
         tools: [
-          { type: "web_search_20260209", name: "web_search", max_uses: 5, allowed_domains: domains },
-          { type: "web_fetch_20260209", name: "web_fetch", max_uses: 6, allowed_domains: domains },
+          { type: "web_search_20250305", name: "web_search", max_uses: 5, allowed_domains: domains },
+          { type: "web_fetch_20250910", name: "web_fetch", max_uses: 6, allowed_domains: domains },
         ],
         messages,
       })
       .finalMessage();
 
+    usage.requests++;
+    usage.input_tokens +=
+      msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0);
+    usage.output_tokens += msg.usage.output_tokens;
+    usage.web_searches += msg.usage.server_tool_use?.web_search_requests ?? 0;
     collectUrls(msg.content, seen);
 
     if (msg.stop_reason === "pause_turn") {
@@ -122,7 +142,7 @@ export async function checkSituation(state: StateCode, situation: string): Promi
     const text = msg.content.findLast((b) => b.type === "text");
     if (!text || text.type !== "text") throw new Error("The model returned no answer.");
     const result = JSON.parse(text.text) as CheckResult;
-    return { ...result, cards: verifyCards(result.cards, seen, domains) };
+    return { ...result, cards: verifyCards(result.cards, seen, domains), usage };
   }
   throw new Error("The search took too long. Please try again.");
 }

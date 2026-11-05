@@ -11,7 +11,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    return Response.json(await checkSituation(state as StateCode, situation));
+    const { usage, ...result } = await checkSituation(state as StateCode, situation);
+    console.log("usage", usage);
+    return Response.json(result);
   } catch (err) {
     console.error(err);
     // Our own errors carry a user-facing message; SDK/network errors may leak internals, so hide them.
